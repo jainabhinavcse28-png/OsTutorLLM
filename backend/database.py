@@ -21,7 +21,14 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
-sqlite_path = Path(__file__).resolve().parent / "ostutorllm.db"
+# On Vercel (serverless), the project root is read-only.
+# Use /tmp for SQLite which is always writable on serverless platforms.
+# Locally, use the backend directory as before.
+IS_VERCEL = os.getenv("VERCEL", "") == "1" or os.getenv("VERCEL_ENV", "") != ""
+if IS_VERCEL:
+    sqlite_path = Path("/tmp/ostutorllm.db")
+else:
+    sqlite_path = Path(__file__).resolve().parent / "ostutorllm.db"
 sqlite_url = f"sqlite:///{sqlite_path.as_posix()}"
 
 engine = None
@@ -33,7 +40,7 @@ if DATABASE_URL and not DATABASE_URL.startswith("sqlite"):
         test_engine = create_engine(
             DATABASE_URL,
             pool_pre_ping=True,
-            connect_args={"connect_timeout": 3}
+            connect_args={"connect_timeout": 5}
         )
         with test_engine.connect() as conn:
             conn.execute(text("SELECT 1"))
@@ -42,9 +49,10 @@ if DATABASE_URL and not DATABASE_URL.startswith("sqlite"):
         print("[DB] Connected successfully to remote PostgreSQL database!")
     except Exception as e:
         print(f"[DB] Remote PostgreSQL connection not available ({e}).")
-        print(f"[DB] Seamlessly switching to local SQLite at {sqlite_path} so OSTutorLLM runs without interruption.")
+        print(f"[DB] Switching to SQLite at {sqlite_path}.")
         engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
 else:
+    print(f"[DB] No DATABASE_URL set. Using SQLite at {sqlite_path}.")
     engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
